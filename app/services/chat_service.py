@@ -1,30 +1,34 @@
-from openai import AsyncOpenAI
+"""Service layer between the HTTP API and the LangGraph agent."""
 
-from app.core.config import get_settings
+from dataclasses import dataclass
 
-SYSTEM_PROMPT = """你是 AI 科研学习助手。请用中文清晰回答问题。
-当问题涉及事实但你不能确定时，要明确说明不确定性，不要编造来源。"""
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+from app.agent.graph import get_research_agent
 
 
-async def generate_reply(message: str) -> str:
-    """调用 DeepSeek 的 OpenAI 兼容 Chat Completions API。"""
-    settings = get_settings()
-    if settings.deepseek_api_key is None:
-        raise ValueError("未配置 DEEPSEEK_API_KEY，请在项目根目录的 .env 中填写后重试。")
+@dataclass
+class AgentReply:
+    answer: str
+    plan: str
+    tools_used: list[str]
 
-    client = AsyncOpenAI(
-        api_key=settings.deepseek_api_key.get_secret_value(),
-        base_url=settings.llm_base_url,
+
+async def generate_reply(message: str) -> AgentReply:
+    """Run one complete Agent turn and extract data suitable for the API response."""
+    graph = get_research_agent()
+    result = await graph.ainvoke(
+        {"messages": [HumanMessage(content=message)]},
+        config={"recursion_limit": 12},
     )
-    response = await client.chat.completions.create(
-        model=settings.llm_model,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": message},
-        ],
-        temperature=0.3,
-        max_tokens=1_000,
+    messages = result["messages"]
+    answer = next(
+        (
+            str(item.content)
+            for item in reversed(messages)
+            if isinstance(item, AIMessage) and not item.tool_calls
+        ),
+        "Agent 没有返回最终回答，请重试。",
     )
-
-    answer = response.choices[0].message.content
-    return answer or "模型没有返回可显示的内容，请重试。"
+    tools_used = [item.name for item in messages if isinstance(item, ToolMessage)]
+    return AgentReply(answer=answer, plan=result.get("plan", "未生成计划。"), tools_used=tools_used)
