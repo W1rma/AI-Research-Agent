@@ -47,7 +47,14 @@ def get_research_agent():
         return {"plan": str(response.content)}
 
     async def agent_node(state: ResearchAgentState) -> dict[str, list]:
-        system_message = SystemMessage(content=AGENT_PROMPT.format(plan=state["plan"]))
+        selected_ids = state.get("selected_document_ids", [])
+        scope_instruction = (
+            f"\n本次请求限定检索的文档 ID：{', '.join(selected_ids)}。"
+            "调用 search_uploaded_documents 时必须把这些 ID 作为 document_ids 参数传入。"
+            if selected_ids
+            else ""
+        )
+        system_message = SystemMessage(content=AGENT_PROMPT.format(plan=state["plan"]) + scope_instruction)
         response = await model_with_tools.ainvoke([system_message, *state["messages"]])
         return {"messages": [response]}
 

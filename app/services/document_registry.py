@@ -1,7 +1,8 @@
-"""JSON-backed registry for uploaded document metadata."""
+"""Small JSON registry for document metadata with atomic writes."""
 
 import json
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from threading import Lock
 from typing import Literal
@@ -38,7 +39,9 @@ class DocumentRegistry:
 
     def _write_all(self, records: dict[str, DocumentRecord]) -> None:
         payload = {key: value.model_dump() for key, value in records.items()}
-        self._path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary_path = self._path.with_suffix(".tmp")
+        temporary_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary_path.replace(self._path)
 
     def list_documents(self) -> list[DocumentRecord]:
         with self._lock:
@@ -85,6 +88,6 @@ class DocumentRegistry:
             return record
 
 
+@lru_cache
 def get_document_registry() -> DocumentRegistry:
-    settings = get_settings()
-    return DocumentRegistry(settings.documents_registry_path)
+    return DocumentRegistry(get_settings().documents_registry_path)

@@ -1,5 +1,6 @@
-"""Upload, ingest, and query uploaded PDF documents."""
+"""Safe upload, ingest, and query operations for uploaded PDF documents."""
 
+import asyncio
 import shutil
 from pathlib import Path
 
@@ -12,10 +13,30 @@ from app.services.document_registry import DocumentRecord, get_document_registry
 
 
 def _safe_filename(name: str) -> str:
-    cleaned = Path(name).name.strip()
+    cleaned = Path(name).name.strip().replace(" ", "_")
     if not cleaned.lower().endswith(".pdf"):
         raise ValueError("仅支持上传 PDF 文件。")
-    return cleaned.replace(" ", "_")
+    if not cleaned:
+        raise ValueError("文件名不能为空。")
+    return cleaned
+
+
+async def _save_pdf_stream(upload: UploadFile, destination: Path, max_bytes: int) -> None:
+    total_size = 0
+    header = b""
+    try:
+        with destination.open("wb") as output:
+            while chunk := await upload.read(1024 * 1024):
+                if len(header) < 1024:
+                    header += chunk[: 1024 - len(header)]
+                total_size += len(chunk)
+                if total_size > max_bytes:
+                    raise ValueError(f"PDF 大小不能超过 {max_bytes // 1024 // 1024} MB。")
+                output.write(chunk)
+    finally:
+        await upload.close()
+    if not header.lstrip().startswith(b"%PDF-"):
+        raise ValueError("上传内容不是有效的 PDF 文件。")
 
 
 async def save_uploaded_pdf(upload: UploadFile) -> DocumentRecord:
@@ -24,17 +45,16 @@ async def save_uploaded_pdf(upload: UploadFile) -> DocumentRecord:
     original_filename = upload.filename or "document.pdf"
     stored_filename = _safe_filename(original_filename)
     record = registry.create_processing_record(original_filename, stored_filename)
-
     document_dir = settings.uploads_dir / record.id
     document_dir.mkdir(parents=True, exist_ok=True)
     destination = document_dir / stored_filename
 
     try:
-        with destination.open("wb") as output:
-            shutil.copyfileobj(upload.file, output)
-        ingest_pdf(record.id, destination, stored_filename)
+        await _save_pdf_stream(upload, destination, settings.max_upload_size_mb * 1024 * 1024)
+        await asyncio.to_thread(ingest_pdf, record.id, destination, stored_filename)
     except Exception as error:
         registry.mark_failed(record.id, str(error))
+        shutil.rmtree(document_dir, ignore_errors=True)
         raise
 
     updated = registry.get_document(record.id)

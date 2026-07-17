@@ -9,4 +9,10 @@ venv/
 # Local data
 data/uploads/
 data/vector_store/
+data/documents.json
+data/sessions.sqlite3
+data/sessions.sqlite3-shm
+data/sessions.sqlite3-wal
+data/tool_logs.jsonl
+.pytest_cache/
 .env

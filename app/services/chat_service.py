@@ -1,14 +1,14 @@
 """Service layer between the HTTP API and the LangGraph agent."""
 
+import json
 from dataclasses import dataclass, field
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
 
 from app.agent.graph import get_research_agent
 from app.schemas.chat import SourceCitation, ToolCallLog
 from app.services.session_service import build_request_messages, store_turn
 from app.services.tool_log_service import append_tool_log
-from app.tools.rag_tools import get_collected_rag_sources, reset_rag_sources, set_active_document_ids
 
 
 @dataclass
@@ -24,24 +24,28 @@ class AgentReply:
 def _extract_tool_calls(messages: list) -> list[ToolCallLog]:
     pending_args: dict[str, dict] = {}
     logs: list[ToolCallLog] = []
-
     for item in messages:
         if isinstance(item, AIMessage) and item.tool_calls:
             for call in item.tool_calls:
-                pending_args[call["id"]] = {
-                    "name": call["name"],
-                    "args": call.get("args", {}),
-                }
-        if isinstance(item, ToolMessage):
+                pending_args[call["id"]] = {"name": call["name"], "args": call.get("args", {})}
+        elif isinstance(item, ToolMessage):
             meta = pending_args.get(item.tool_call_id, {"name": item.name or "unknown", "args": {}})
-            logs.append(
-                ToolCallLog(
-                    name=meta["name"],
-                    args=meta["args"],
-                    result=str(item.content),
-                )
-            )
+            logs.append(ToolCallLog(name=meta["name"], args=meta["args"], result=str(item.content)))
     return logs
+
+
+def _extract_rag_sources(messages: list) -> list[dict]:
+    """Read citations from the RAG tool payload instead of process-local state."""
+    sources: list[dict] = []
+    for item in messages:
+        if not isinstance(item, ToolMessage) or item.name != "search_uploaded_documents":
+            continue
+        try:
+            payload = json.loads(str(item.content))
+        except json.JSONDecodeError:
+            continue
+        sources.extend(payload.get("sources", []))
+    return sources
 
 
 def _dedupe_sources(raw_sources: list[dict]) -> list[SourceCitation]:
@@ -58,6 +62,8 @@ def _dedupe_sources(raw_sources: list[dict]) -> list[SourceCitation]:
                 filename=item["filename"],
                 page=item.get("page"),
                 excerpt=item["excerpt"],
+                score=item.get("score"),
+                highlights=item.get("highlights", []),
             )
         )
     return citations
@@ -68,16 +74,13 @@ async def generate_reply(
     session_id: str | None = None,
     document_ids: list[str] | None = None,
 ) -> AgentReply:
-    """Run one complete Agent turn and extract data suitable for the API response."""
-    reset_rag_sources()
-    set_active_document_ids(document_ids)
+    """Run a complete turn, then persist only the user-facing final answer."""
     active_session_id, request_messages = build_request_messages(session_id, message)
-
-    graph = get_research_agent()
-    result = await graph.ainvoke(
-        {"messages": request_messages},
-        config={"recursion_limit": 12},
-    )
+    graph_input = {"messages": request_messages}
+    if document_ids:
+        # The graph prompt exposes the currently selected IDs for the model to pass to the tool.
+        graph_input["selected_document_ids"] = document_ids
+    result = await get_research_agent().ainvoke(graph_input, config={"recursion_limit": 12})
     messages = result["messages"]
     answer = next(
         (
@@ -89,12 +92,11 @@ async def generate_reply(
     )
     tools_used = [item.name for item in messages if isinstance(item, ToolMessage) and item.name]
     tool_calls = _extract_tool_calls(messages)
-    sources = _dedupe_sources(get_collected_rag_sources())
+    sources = _dedupe_sources(_extract_rag_sources(messages))
 
     store_turn(active_session_id, message, answer)
     for log in tool_calls:
         append_tool_log(active_session_id, log.name, log.args, log.result)
-
     return AgentReply(
         answer=answer,
         plan=result.get("plan", "未生成计划。"),

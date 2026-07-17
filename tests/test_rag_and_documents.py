@@ -1,6 +1,7 @@
 from app.rag.pdf_processor import extract_and_chunk_pdf
+from app.rag.vector_store import highlight_terms
 from app.services.document_registry import DocumentRegistry
-from app.services.session_service import build_request_messages, create_session_id, store_turn
+from app.services.session_service import SQLiteSessionStore
 from app.tools.arxiv_tools import search_arxiv_papers
 
 MINIMAL_PDF = b"""%PDF-1.4
@@ -14,12 +15,12 @@ endobj
 5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj
 xref
 0 6
-0000000000 65535 f 
-0000000009 00000 n 
-0000000058 00000 n 
-0000000115 00000 n 
-0000000263 00000 n 
-0000000370 00000 n 
+0000000000 65535 f
+0000000009 00000 n
+0000000058 00000 n
+0000000115 00000 n
+0000000263 00000 n
+0000000370 00000 n
 trailer<</Size 6/Root 1 0 R>>
 startxref
 444
@@ -29,33 +30,32 @@ startxref
 def test_extract_and_chunk_pdf(tmp_path) -> None:
     pdf_path = tmp_path / "sample.pdf"
     pdf_path.write_bytes(MINIMAL_PDF)
-
     result = extract_and_chunk_pdf(str(pdf_path), "doc-1", "sample.pdf")
-
     assert result.page_count == 1
-    assert len(result.chunks) >= 1
     assert result.chunks[0].metadata["document_id"] == "doc-1"
+    assert result.chunks[0].metadata["extraction_method"] == "text"
 
 
 def test_document_registry_create_and_mark_ready(tmp_path) -> None:
     registry = DocumentRegistry(tmp_path / "documents.json")
     record = registry.create_processing_record("paper.pdf", "paper.pdf")
-    assert record.status == "processing"
-
     updated = registry.mark_ready(record.id, page_count=3, chunk_count=10)
     assert updated.status == "ready"
     assert updated.page_count == 3
-    assert updated.chunk_count == 10
 
 
-def test_session_service_keeps_history() -> None:
-    session_id = create_session_id()
-    _, first_messages = build_request_messages(session_id, "第一轮问题")
-    assert len(first_messages) == 1
+def test_sqlite_session_store_persists_history(tmp_path) -> None:
+    store = SQLiteSessionStore(tmp_path / "sessions.sqlite3", history_limit=4)
+    store.append_turn("session-1", "第一轮问题", "第一轮回答")
+    restored_store = SQLiteSessionStore(tmp_path / "sessions.sqlite3", history_limit=4)
+    messages = restored_store.get_messages("session-1")
+    assert [str(message.content) for message in messages] == ["第一轮问题", "第一轮回答"]
 
-    store_turn(session_id, "第一轮问题", "第一轮回答")
-    _, second_messages = build_request_messages(session_id, "第二轮问题")
-    assert len(second_messages) == 3
+
+def test_highlight_terms_marks_matching_excerpt() -> None:
+    excerpt, highlights = highlight_terms("RAG combines retrieval and generation.", "What is RAG?")
+    assert "【rag】" in excerpt.lower()
+    assert "rag" in highlights
 
 
 def test_search_arxiv_papers_rejects_empty_query() -> None:

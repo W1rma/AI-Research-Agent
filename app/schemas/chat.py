@@ -1,20 +1,29 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(..., min_length=1, max_length=5_000, description="用户的问题")
-    session_id: str | None = Field(default=None, description="可选会话 ID，用于多轮记忆")
-    document_ids: list[str] | None = Field(
-        default=None,
-        description="可选文档 ID 列表，限制 RAG 检索范围",
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "message": "根据我上传的论文，作者使用了什么方法？请给出页码依据。"
+                }
+            ]
+        }
     )
+
+    message: str = Field(..., min_length=1, max_length=5_000, description="用户的问题")
+    session_id: str | None = Field(default=None, max_length=128, description="可选会话 ID，用于多轮记忆")
+    document_ids: list[str] | None = Field(default=None, description="可选文档 ID 列表，限制 RAG 检索范围")
 
 
 class SourceCitation(BaseModel):
     document_id: str = Field(..., description="来源文档 ID")
     filename: str = Field(..., description="来源文件名")
     page: int | None = Field(default=None, description="页码")
-    excerpt: str = Field(..., description="引用片段")
+    excerpt: str = Field(..., description="引用片段；匹配词以【】标记")
+    score: float | None = Field(default=None, description="混合检索排序分数")
+    highlights: list[str] = Field(default_factory=list, description="命中的检索词")
 
 
 class ToolCallLog(BaseModel):
