@@ -8,9 +8,13 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 @router.post("", response_model=ChatResponse, status_code=status.HTTP_200_OK)
 async def chat(request: ChatRequest) -> ChatResponse:
-    """运行 Research Agent，并返回回答、计划与实际使用的工具。"""
+    """运行 Research Agent，并返回回答、计划、工具日志与引用来源。"""
     try:
-        result = await generate_reply(request.message)
+        result = await generate_reply(
+            message=request.message,
+            session_id=request.session_id,
+            document_ids=request.document_ids,
+        )
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
 
@@ -18,4 +22,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
         answer=result.answer,
         plan=result.plan,
         tools_used=result.tools_used,
+        sources=result.sources,
+        tool_calls=result.tool_calls,
+        session_id=result.session_id,
     )

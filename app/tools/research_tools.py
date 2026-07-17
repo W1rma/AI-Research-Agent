@@ -72,4 +72,13 @@ def generate_study_plan(topic: str, duration_weeks: int = 4, hours_per_week: int
     return "基础学习计划：\n" + "\n".join(items)
 
 
-RESEARCH_TOOLS = [calculate, get_current_date, generate_study_plan]
+from app.tools.arxiv_tools import search_arxiv_papers
+from app.tools.rag_tools import search_uploaded_documents
+
+RESEARCH_TOOLS = [
+    calculate,
+    get_current_date,
+    generate_study_plan,
+    search_arxiv_papers,
+    search_uploaded_documents,
+]
