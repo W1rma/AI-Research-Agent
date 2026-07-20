@@ -48,13 +48,21 @@ def get_research_agent():
 
     async def agent_node(state: ResearchAgentState) -> dict[str, list]:
         selected_ids = state.get("selected_document_ids", [])
+        paper_search_instruction = (
+            "\n论文检索规则：用户要求某一个具体年份时，同时传入 start_year 和 end_year；"
+            "没有新的检索意图时不要重复调用 search_arxiv_papers；max_results 要与用户要求的数量一致。"
+        )
         scope_instruction = (
             f"\n本次请求限定检索的文档 ID：{', '.join(selected_ids)}。"
             "调用 search_uploaded_documents 时必须把这些 ID 作为 document_ids 参数传入。"
             if selected_ids
             else ""
         )
-        system_message = SystemMessage(content=AGENT_PROMPT.format(plan=state["plan"]) + scope_instruction)
+        system_message = SystemMessage(
+            content=AGENT_PROMPT.format(plan=state["plan"])
+            + paper_search_instruction
+            + scope_instruction
+        )
         response = await model_with_tools.ainvoke([system_message, *state["messages"]])
         return {"messages": [response]}
 

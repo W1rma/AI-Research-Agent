@@ -7,6 +7,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 
 from app.agent.graph import get_research_agent
 from app.schemas.chat import SourceCitation, ToolCallLog
+from app.schemas.papers import PaperResult
 from app.services.session_service import build_request_messages, store_turn
 from app.services.tool_log_service import append_tool_log
 
@@ -17,6 +18,7 @@ class AgentReply:
     plan: str
     tools_used: list[str]
     sources: list[SourceCitation] = field(default_factory=list)
+    paper_sources: list[PaperResult] = field(default_factory=list)
     tool_calls: list[ToolCallLog] = field(default_factory=list)
     session_id: str | None = None
 
@@ -30,8 +32,31 @@ def _extract_tool_calls(messages: list) -> list[ToolCallLog]:
                 pending_args[call["id"]] = {"name": call["name"], "args": call.get("args", {})}
         elif isinstance(item, ToolMessage):
             meta = pending_args.get(item.tool_call_id, {"name": item.name or "unknown", "args": {}})
-            logs.append(ToolCallLog(name=meta["name"], args=meta["args"], result=str(item.content)))
+            logs.append(
+                ToolCallLog(
+                    name=meta["name"],
+                    args=meta["args"],
+                    result=_summarize_tool_result(meta["name"], item.content),
+                )
+            )
     return logs
+
+
+def _summarize_tool_result(tool_name: str, content: object) -> str:
+    """Keep API tool logs useful without duplicating large structured payloads."""
+    if tool_name != "search_arxiv_papers":
+        return str(content)
+
+    try:
+        payload = json.loads(str(content))
+    except json.JSONDecodeError:
+        # Provider and validation errors are already concise, so retain them verbatim.
+        return str(content)
+
+    papers = payload.get("papers")
+    if not isinstance(papers, list):
+        return str(content)
+    return f"arXiv 返回 {len(papers)} 篇候选论文，完整信息见 paper_sources。"
 
 
 def _extract_rag_sources(messages: list) -> list[dict]:
@@ -46,6 +71,31 @@ def _extract_rag_sources(messages: list) -> list[dict]:
             continue
         sources.extend(payload.get("sources", []))
     return sources
+
+
+def _extract_paper_sources(messages: list) -> list[PaperResult]:
+    """Return candidates from the latest successful paper-search call in this turn.
+
+    An agent can refine a query and call arXiv more than once.  Returning every
+    intermediate response makes ``paper_sources`` ambiguous and can expose
+    papers that the final answer did not use.
+    """
+    latest_papers: list[PaperResult] | None = None
+    for item in messages:
+        if not isinstance(item, ToolMessage) or item.name != "search_arxiv_papers":
+            continue
+        try:
+            payload = json.loads(str(item.content))
+        except json.JSONDecodeError:
+            continue
+        raw_papers = payload.get("papers")
+        if not isinstance(raw_papers, list):
+            continue
+        try:
+            latest_papers = [PaperResult.model_validate(raw_paper) for raw_paper in raw_papers]
+        except (TypeError, ValueError):
+            continue
+    return latest_papers or []
 
 
 def _dedupe_sources(raw_sources: list[dict]) -> list[SourceCitation]:
@@ -93,6 +143,7 @@ async def generate_reply(
     tools_used = [item.name for item in messages if isinstance(item, ToolMessage) and item.name]
     tool_calls = _extract_tool_calls(messages)
     sources = _dedupe_sources(_extract_rag_sources(messages))
+    paper_sources = _extract_paper_sources(messages)
 
     store_turn(active_session_id, message, answer)
     for log in tool_calls:
@@ -102,6 +153,7 @@ async def generate_reply(
         plan=result.get("plan", "未生成计划。"),
         tools_used=tools_used,
         sources=sources,
+        paper_sources=paper_sources,
         tool_calls=tool_calls,
         session_id=active_session_id,
     )

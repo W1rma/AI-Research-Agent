@@ -1,43 +1,36 @@
-"""arXiv paper search tool."""
+"""LangGraph tool adapter for the arXiv paper-search service."""
 
-import arxiv
+import json
+
 from langchain_core.tools import tool
+
+from app.schemas.papers import PaperSearchParams
+from app.services.paper_search import PaperSearchError, search_arxiv
 
 
 @tool
-def search_arxiv_papers(query: str, max_results: int = 5) -> str:
-    """在 arXiv 上检索学术论文。适合查找论文标题、作者、摘要和 arXiv 链接。"""
-    query = query.strip()
-    if not query:
-        return "检索关键词不能为空。"
-    if not 1 <= max_results <= 10:
-        return "max_results 需在 1 到 10 之间。"
-
-    client = arxiv.Client()
-    search = arxiv.Search(
-        query=query,
-        max_results=max_results,
-        sort_by=arxiv.SortCriterion.Relevance,
-    )
-
-    papers: list[str] = []
-    for index, result in enumerate(client.results(search), start=1):
-        authors = ", ".join(author.name for author in result.authors[:5])
-        summary = result.summary.replace("\n", " ").strip()
-        if len(summary) > 280:
-            summary = summary[:280] + "..."
-        papers.append(
-            "\n".join(
-                [
-                    f"{index}. {result.title}",
-                    f"   作者: {authors}",
-                    f"   发布日期: {result.published.date()}",
-                    f"   链接: {result.entry_id}",
-                    f"   摘要: {summary}",
-                ]
+def search_arxiv_papers(
+    query: str,
+    max_results: int = 5,
+    category: str | None = None,
+    start_year: int | None = None,
+    end_year: int | None = None,
+    sort_by: str = "relevance",
+) -> str:
+    """在 arXiv 检索论文，返回标题、作者、摘要、日期和 PDF 链接。"""
+    try:
+        response = search_arxiv(
+            PaperSearchParams(
+                query=query,
+                max_results=max_results,
+                category=category,
+                start_year=start_year,
+                end_year=end_year,
+                sort_by=sort_by,
             )
         )
-
-    if not papers:
-        return f"未在 arXiv 找到与「{query}」相关的论文。"
-    return "arXiv 检索结果：\n" + "\n\n".join(papers)
+    except ValueError as error:
+        return f"论文检索参数无效：{error}"
+    except PaperSearchError as error:
+        return str(error)
+    return json.dumps(response.model_dump(mode="json"), ensure_ascii=False)
