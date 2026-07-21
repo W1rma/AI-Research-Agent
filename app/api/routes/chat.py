@@ -24,6 +24,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
         tools_used=result.tools_used,
         sources=result.sources,
         paper_sources=result.paper_sources,
+        web_sources=result.web_sources,
         tool_calls=result.tool_calls,
         session_id=result.session_id,
     )

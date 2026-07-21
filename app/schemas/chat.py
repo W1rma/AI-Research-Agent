@@ -1,6 +1,9 @@
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.papers import PaperResult
+from app.schemas.web import WebResult
 
 
 class ChatRequest(BaseModel):
@@ -20,6 +23,7 @@ class ChatRequest(BaseModel):
 
 
 class SourceCitation(BaseModel):
+    source_type: Literal["local_document"] = "local_document"
     document_id: str = Field(..., description="来源文档 ID")
     filename: str = Field(..., description="来源文件名")
     page: int | None = Field(default=None, description="页码")
@@ -42,6 +46,10 @@ class ChatResponse(BaseModel):
     paper_sources: list[PaperResult] = Field(
         default_factory=list,
         description="本轮最后一次成功 arXiv 检索返回的候选论文；不等同于模型最终推荐的全部论文",
+    )
+    web_sources: list[WebResult] = Field(
+        default_factory=list,
+        description="本轮最后一次成功公开网页检索返回的结果；公开网页不等同于同行评审论文",
     )
     tool_calls: list[ToolCallLog] = Field(default_factory=list, description="工具调用日志")
     session_id: str | None = Field(default=None, description="本次会话 ID")

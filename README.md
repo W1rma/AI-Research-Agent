@@ -88,4 +88,13 @@ python -m pytest
 
 - 为 PDF 表格、公式和图片增加更细粒度的解析策略。
 - 在前端展示引用片段与高亮位置。
-- 进入论文检索与联网搜索阶段，完善 arXiv 结果筛选与来源可信度策略。
+- 继续完善来源可信度策略，并在下一阶段接入更多公开资料源。
+
+## 第三周进度：来源路由与联网资料搜索
+
+- `GET /api/v1/papers/search`：独立检索 arXiv 论文资料。
+- `GET /api/v1/web/search`：独立检索公开网页资料，无需额外 API Key。
+- Agent 会根据问题路由到本地 PDF 知识库、arXiv 论文或公开网页；混合问题可调用多个来源。
+- Chat 响应使用 `sources`、`paper_sources`、`web_sources` 区分三类结果，并在最终回答结尾补充来源说明。
+
+详细约定与测试示例见 `docs/source-routing.md`。

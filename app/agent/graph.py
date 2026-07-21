@@ -52,6 +52,13 @@ def get_research_agent():
             "\n论文检索规则：用户要求某一个具体年份时，同时传入 start_year 和 end_year；"
             "没有新的检索意图时不要重复调用 search_arxiv_papers；max_results 要与用户要求的数量一致。"
         )
+        source_routing_instruction = (
+            "\n来源路由规则：用户指定已上传 PDF、讲义或本地笔记时，调用 search_uploaded_documents；"
+            "用户要论文、预印本或学术资料时，调用 search_arxiv_papers；"
+            "用户要最新动态、官方文档、产品资料或一般公开网页资料时，调用 search_public_web。"
+            "需要综合比较时可以调用多个工具，但最终回答必须按“本地知识库 / arXiv 论文 / 公开网页”明确说明信息来源；"
+            "公开网页只能作为背景或时效性资料，不能表述为同行评审结论。"
+        )
         scope_instruction = (
             f"\n本次请求限定检索的文档 ID：{', '.join(selected_ids)}。"
             "调用 search_uploaded_documents 时必须把这些 ID 作为 document_ids 参数传入。"
@@ -61,6 +68,7 @@ def get_research_agent():
         system_message = SystemMessage(
             content=AGENT_PROMPT.format(plan=state["plan"])
             + paper_search_instruction
+            + source_routing_instruction
             + scope_instruction
         )
         response = await model_with_tools.ainvoke([system_message, *state["messages"]])

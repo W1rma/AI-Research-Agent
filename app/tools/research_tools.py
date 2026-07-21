@@ -74,6 +74,7 @@ def generate_study_plan(topic: str, duration_weeks: int = 4, hours_per_week: int
 
 from app.tools.arxiv_tools import search_arxiv_papers
 from app.tools.rag_tools import search_uploaded_documents
+from app.tools.web_search_tools import search_public_web
 
 RESEARCH_TOOLS = [
     calculate,
@@ -81,4 +82,5 @@ RESEARCH_TOOLS = [
     generate_study_plan,
     search_arxiv_papers,
     search_uploaded_documents,
+    search_public_web,
 ]

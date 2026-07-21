@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 from app.agent.graph import get_research_agent
 from app.schemas.chat import SourceCitation, ToolCallLog
 from app.schemas.papers import PaperResult
+from app.schemas.web import WebResult
 from app.services.session_service import build_request_messages, store_turn
 from app.services.tool_log_service import append_tool_log
 
@@ -19,6 +20,7 @@ class AgentReply:
     tools_used: list[str]
     sources: list[SourceCitation] = field(default_factory=list)
     paper_sources: list[PaperResult] = field(default_factory=list)
+    web_sources: list[WebResult] = field(default_factory=list)
     tool_calls: list[ToolCallLog] = field(default_factory=list)
     session_id: str | None = None
 
@@ -44,7 +46,7 @@ def _extract_tool_calls(messages: list) -> list[ToolCallLog]:
 
 def _summarize_tool_result(tool_name: str, content: object) -> str:
     """Keep API tool logs useful without duplicating large structured payloads."""
-    if tool_name != "search_arxiv_papers":
+    if tool_name not in {"search_arxiv_papers", "search_public_web"}:
         return str(content)
 
     try:
@@ -53,10 +55,13 @@ def _summarize_tool_result(tool_name: str, content: object) -> str:
         # Provider and validation errors are already concise, so retain them verbatim.
         return str(content)
 
-    papers = payload.get("papers")
-    if not isinstance(papers, list):
+    result_key = "papers" if tool_name == "search_arxiv_papers" else "results"
+    results = payload.get(result_key)
+    if not isinstance(results, list):
         return str(content)
-    return f"arXiv 返回 {len(papers)} 篇候选论文，完整信息见 paper_sources。"
+    if tool_name == "search_arxiv_papers":
+        return f"arXiv 返回 {len(results)} 篇候选论文，完整信息见 paper_sources。"
+    return f"公开网页检索返回 {len(results)} 条结果，完整信息见 web_sources。"
 
 
 def _extract_rag_sources(messages: list) -> list[dict]:
@@ -98,6 +103,26 @@ def _extract_paper_sources(messages: list) -> list[PaperResult]:
     return latest_papers or []
 
 
+def _extract_web_sources(messages: list) -> list[WebResult]:
+    """Return results from the latest successful public-web search in this turn."""
+    latest_results: list[WebResult] | None = None
+    for item in messages:
+        if not isinstance(item, ToolMessage) or item.name != "search_public_web":
+            continue
+        try:
+            payload = json.loads(str(item.content))
+        except json.JSONDecodeError:
+            continue
+        raw_results = payload.get("results")
+        if not isinstance(raw_results, list):
+            continue
+        try:
+            latest_results = [WebResult.model_validate(raw_result) for raw_result in raw_results]
+        except (TypeError, ValueError):
+            continue
+    return latest_results or []
+
+
 def _dedupe_sources(raw_sources: list[dict]) -> list[SourceCitation]:
     seen: set[tuple[str, int | None, str]] = set()
     citations: list[SourceCitation] = []
@@ -117,6 +142,28 @@ def _dedupe_sources(raw_sources: list[dict]) -> list[SourceCitation]:
             )
         )
     return citations
+
+
+def _build_source_notice(
+    local_sources: list[SourceCitation],
+    paper_sources: list[PaperResult],
+    web_sources: list[WebResult],
+) -> str:
+    """Attach deterministic source labels even if the model omits them."""
+    sections: list[str] = []
+    if local_sources:
+        labels = [
+            f"{source.filename}" + (f"（第 {source.page} 页）" if source.page else "")
+            for source in local_sources[:3]
+        ]
+        sections.append("本地知识库（RAG）：" + "、".join(labels))
+    if paper_sources:
+        labels = [f"{paper.title}（arXiv:{paper.arxiv_id}）" for paper in paper_sources[:3]]
+        sections.append("arXiv 论文：" + "；".join(labels))
+    if web_sources:
+        labels = [f"{source.title}（{source.url}）" for source in web_sources[:3]]
+        sections.append("公开网页：" + "；".join(labels))
+    return "\n\n来源说明：\n" + "\n".join(f"- {section}" for section in sections) if sections else ""
 
 
 async def generate_reply(
@@ -144,6 +191,8 @@ async def generate_reply(
     tool_calls = _extract_tool_calls(messages)
     sources = _dedupe_sources(_extract_rag_sources(messages))
     paper_sources = _extract_paper_sources(messages)
+    web_sources = _extract_web_sources(messages)
+    answer += _build_source_notice(sources, paper_sources, web_sources)
 
     store_turn(active_session_id, message, answer)
     for log in tool_calls:
@@ -154,6 +203,7 @@ async def generate_reply(
         tools_used=tools_used,
         sources=sources,
         paper_sources=paper_sources,
+        web_sources=web_sources,
         tool_calls=tool_calls,
         session_id=active_session_id,
     )
