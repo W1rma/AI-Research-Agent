@@ -18,6 +18,8 @@ def search_arxiv_papers(
     sort_by: str = "relevance",
 ) -> str:
     """在 arXiv 检索论文，返回标题、作者、摘要、日期和 PDF 链接。"""
+    if not query.strip():
+        return "检索关键词不能为空。"
     try:
         response = search_arxiv(
             PaperSearchParams(

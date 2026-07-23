@@ -1,4 +1,4 @@
-"""Backward-compatible import for the supervisor-led multi-agent graph."""
+"""Supervisor-led multi-agent orchestration for the Research Agent."""
 
 from app.agents.graph import get_research_agent
 

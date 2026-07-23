@@ -68,11 +68,54 @@
 
 3. 重启 FastAPI 服务后再上传扫描版 PDF。
 
-## 测试
+## 测试与验收
+
+项目当前以后端原型为主，尚未构建独立前端。所有功能均可通过自动化测试和 FastAPI Swagger
+交互文档复现，不需要编写额外测试脚本。
+
+### 自动化测试
 
 ```powershell
 python -m pytest
 ```
+
+测试覆盖基础工具、PDF 处理、文档注册、会话持久化、混合检索、arXiv、公开网页搜索、
+来源提取、多 Agent 路由顺序和专业 Agent 工具权限隔离。
+
+### Swagger 接口验收
+
+启动服务后访问 `http://127.0.0.1:8000/docs`，通过 `POST /api/v1/chat` 验证 Supervisor
+是否把请求交给了正确的专业 Agent：
+
+| 测试目标 | 示例问题 | `agents_used` | 预期工具 | 预期来源字段 |
+| --- | --- | --- | --- | --- |
+| Knowledge Agent | 总结我上传的 PDF，并给出页码依据 | `knowledge` | `search_uploaded_documents` | `sources` |
+| Literature Agent | 查找 3 篇 RAG 评估方向的 arXiv 论文 | `literature` | `search_arxiv_papers` | `paper_sources` |
+| Web Agent | 查找 FastAPI 最新官方文档 | `web` | `search_public_web` | `web_sources` |
+| Learning Agent | 制定两周 LangGraph 学习计划 | `learning` | `generate_study_plan` | 无外部来源 |
+
+### Knowledge Agent 完整验证流程
+
+1. 在 Swagger 中调用 `POST /api/v1/documents/upload` 上传一份 PDF，并确认响应状态为
+   `ready`。也可以调用 `GET /api/v1/documents` 获取已有文档的 `id`。
+2. 调用 `POST /api/v1/chat`：
+
+   ```json
+   {
+     "message": "总结这篇文档的核心方法，并提供页码依据。",
+     "document_ids": ["替换为真实的-document_id"]
+   }
+   ```
+
+3. 检查响应：
+   - `agents_used` 包含 `knowledge`；
+   - `tools_used` 包含 `search_uploaded_documents`；
+   - `sources` 至少包含一条记录，并带有 `document_id`、`filename`、`page` 和 `excerpt`；
+   - `paper_sources` 与 `web_sources` 为空；
+   - `answer` 结尾包含本地知识库来源说明。
+
+混合任务可以同时出现多个 `agents_used` 和多个来源字段。例如“比较我上传的论文与最新官方资料”
+应至少路由到 Knowledge Agent 与 Web Agent。
 
 ## 数据目录
 
@@ -98,3 +141,12 @@ python -m pytest
 - Chat 响应使用 `sources`、`paper_sources`、`web_sources` 区分三类结果，并在最终回答结尾补充来源说明。
 
 详细约定与测试示例见 `docs/source-routing.md`。
+
+## 第四周进度：多 Agent 架构
+
+- Supervisor Agent 根据问题选择 Knowledge、Literature、Web 或 Learning Agent。
+- 每个专业 Agent 只拥有职责范围内的工具权限。
+- 混合任务可以依次调用多个专业 Agent，再由 Synthesis Agent 生成统一回答。
+- Chat 响应新增 `agents_used` 和 `routing_reason`，用于验证路由过程。
+
+详细架构与扩展方法见 `docs/multi-agent.md`。

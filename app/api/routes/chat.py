@@ -21,6 +21,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
     return ChatResponse(
         answer=result.answer,
         plan=result.plan,
+        agents_used=result.agents_used,
+        routing_reason=result.routing_reason,
         tools_used=result.tools_used,
         sources=result.sources,
         paper_sources=result.paper_sources,

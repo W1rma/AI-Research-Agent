@@ -18,6 +18,8 @@ class AgentReply:
     answer: str
     plan: str
     tools_used: list[str]
+    agents_used: list[str] = field(default_factory=list)
+    routing_reason: str = ""
     sources: list[SourceCitation] = field(default_factory=list)
     paper_sources: list[PaperResult] = field(default_factory=list)
     web_sources: list[WebResult] = field(default_factory=list)
@@ -200,6 +202,8 @@ async def generate_reply(
     return AgentReply(
         answer=answer,
         plan=result.get("plan", "未生成计划。"),
+        agents_used=result.get("routes", []),
+        routing_reason=result.get("routing_reason", ""),
         tools_used=tools_used,
         sources=sources,
         paper_sources=paper_sources,
